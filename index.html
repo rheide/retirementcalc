@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>UK Retirement Calculator</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            background-color: #000;
+            margin-left: auto;
+            margin-right: auto;
+            width: 90%;
+            color: #ddd;
+            font-size: 14px;
+            font-family: monospace;
+        }
+
+        @media only screen and (max-width: 800px) {
+            body {
+                width: 95%;
+                padding: 8px;
+            }
+
+            #section-projection-chart {
+                height: 40vh;
+            }
+
+            .projection.config {
+                max-height: 50vh;
+                overflow-y: auto;
+            }
+
+            .projection.config ul {
+                width: 95%;
+            }
+
+            a.info_link {
+                font-size: 150%;
+            }
+
+            .info_text {
+                width: 85%;
+            }
+        }
+
+        @media only screen and (min-width: 800px) {
+            #section-projection-chart {
+                height: 800px;
+                margin-top: 16px;
+            }
+
+            .projection.config ul {
+                width: 440px;
+            }
+
+            .projection.config label {
+                word-wrap: break-word;
+                max-width: 240px;
+                margin-bottom: 6px;
+                margin-top: 6px;
+            }
+
+            .info_text {
+                width: 440px;
+                max-height: 280px;
+            }
+        }
+
+        .projection.config .fields {
+            display: inline-block;
+            float: right;
+        }
+
+        .projection.config input[type=number],
+        .projection.config input[type=text] {
+            width: 70px;
+        }
+
+        .projection.config ul {
+            vertical-align: top;
+            display: inline-block;
+            padding: 8px;
+            border: 1px solid #999;
+            margin: 8px;
+        }
+
+        .projection.config ul:before {
+            content: attr(aria-label);
+            font-size: 120%;
+            font-weight: bold;
+            margin-top: -20px;
+            float: left;
+            dislay: inline-block;
+            background-color: #000000;
+        }
+
+        body.share .noshare {
+            display: none;
+        }
+
+        body:not(.share) .share {
+            display: none;
+        }
+
+        .projection.config ul li {
+            display: block;
+            clear: both;
+        }
+
+        .projection.config label {
+            display: inline-block;
+        }
+
+        #section-projection-chart .point-label {
+            display: inline-block;
+            width: 170px;
+        }
+
+        #section-projection-chart .point-value {
+            display: inline-block;
+            width: 90px;
+            text-align: right;
+        }
+
+        a.info_link {
+            color: #7cb5ec;
+            text-decoration: none;
+            font-weight: bold;
+            display: inline-block;
+            padding-right: 4px;
+        }
+
+        .info_text {
+            position: absolute;
+            background-color: #222222;
+            border: 1px solid #999;
+            z-index: 1;
+            padding: 8px;
+            overflow-y: auto;
+        }
+
+        a {
+            color: #ffffff;
+        }
+
+        .sharebox {
+            color: #ddd;
+            background-color: #222222;
+            padding: 4px;
+            width: 85%;
+            margin-left: auto;
+            margin-right: auto;
+        }
+    </style>
+    <script src="https://code.highcharts.com/highcharts.js"></script>
+    <script src="https://code.highcharts.com/highcharts-more.js"></script>
+    <script>
+        let shareData, sharePlotlines;
+        const _perc = (val) => parseFloat(val) / 100.0;
+        const _int = (val) => parseInt(val);
+        const _item = (key, label, value, step, parse, dir) => ({
+            key: key, label: label, value: value, step: step, parse: parse, dir: dir
+        });
+
+        const currentYear = new Date().getFullYear();
+        let projectionChart = null, projectionChartSeries = {}, projectionChartPlotLines = [];
+        let pairs = {}, infoEl;
+        const projectionConfig = [
+            {
+                label: 'General',
+                items: [
+                    _item('year_of_birth', 'Year of Birth', 1990, 1, _int, -1),
+                    _item('retire_year', 'Retirement Year', 2040, 1, _int, 1),
+                    _item('cost_of_living', '£ Cost of Living', 32000, 1000, _int, -1),
+                    _item('inflation', '% Economic Inflation', 2.5, 0.5, _perc, -1),
+                    _item('inflation_before', '% Lifestyle Inflation Pre-Retirement', 0.5, 0.5, _perc, -1),
+                    _item('inflation_after', '% Lifestyle Inflation After Retirement', 0, 0.5, _perc, -1),
+                    _item('inflation_pension', '% Lifestyle Inflation After Pension', -0.5, 0.5, _perc, -1),
+                    _item('persons', '# Persons in Household', 2, 1, _int, 1),
+                ]
+            },
+            {
+                label: 'In: Capital',
+                items: [
+                    _item('capital', '£ Capital Amount', 100000, 10000, _int, 1),
+                    _item('capital_invest', '£ Yearly Add Pre-Retirement', 10000, 1000, _int, 1),
+                    _item('roi_before', '% ROI Pre-Retirement', 7, 0.5, _perc, 1),
+                    _item('roi_after', '% ROI After Retirement', 6, 0.5, _perc, 1),
+                    _item('roi_pension', '% ROI After Pension', 5, 0.5, _perc, 1),
+                    _item('capital_gains_allowance', '£ Capital Gains Allowance', 12300, 1000, _int, 1),
+                    _item('capital_gains_allowance_inflation', '% Capital Gains Inflation', 1.0, 0.5, _perc, 1),
+                    _item('tax_free_percent', '% Tax free (ISA)', 50, 10, _perc, 1),
+                ]
+            },
+            {
+                label: 'In: Personal Pension',
+                items: [
+                    _item('pension_amount', '£ Pension Amount', 50000, 5000, _int, 1),
+                    _item('pension_add', '£ Yearly Add Pre-Retirement', 6000, 1000, _int, 1),
+                    _item('pension_increase', '% ROI', 4, 0.5, _perc, 1),
+                    _item('pensionWithdrawalAge', 'Withdrawal Age', 55, 1, _int, -1),
+                ]
+            },
+            {
+                label: 'In: State Pension',
+                items: [
+                    _item('state_pension_years_worked', 'Years Worked', 10, 1, _int, 1),
+                    _item('state_pension_age', 'Pension Age', 70, 1, _int, -1),
+                    _item('statePensionAmount', '£ Max Yearly Amount', 180 * 52, 1000, _int, 1),
+                ]
+            },
+            {
+                label: 'Out: Mortgage',
+                items: [
+                    _item('mortgage_year', 'Mortage End Year', 2042, 1, _int, -1),
+                    _item('mortgage_amount', '£ Mortage Cost per Year', 12000, 1000, _int, -1),
+                ]
+            }
+        ];
+        const configMap = {};
+        projectionConfig.forEach(section => {
+            section.items.forEach((obj) => {
+                configMap[obj.key] = obj;
+            });
+        });
+
+        // https://stackoverflow.com/questions/24004791/can-someone-explain-the-debounce-function-in-javascript
+        function debounce(func, wait, immediate) {
+            var timeout;
+            return function () {
+                var context = this, args = arguments;
+                var later = function () {
+                    timeout = null;
+                    if (!immediate) func.apply(context, args);
+                };
+                var callNow = immediate && !timeout;
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+                if (callNow) func.apply(context, args);
+            };
+        }
+
+        function initConfig() {
+            var el = document.getElementById("projection_form");
+            let html = "<div class='container'>";
+            html += projectionConfig.map(cfg => {
+                let sectionHtml = "<ul class='buttons' aria-label='" + cfg.label + "'>";
+                sectionHtml += cfg.items.map(item => {
+                    const infoEl = document.getElementById(item.key + "_info");
+                    return "<li>" +
+                        "<a style='" + (infoEl ? "" : "visibility: hidden;") + "' href='#' class='info_link' data-info-id='" + item.key + "_info'>&#9432;</a>" +
+                        "<label for='" + item.key + "'>" + item.label + "</label>" +
+                        "<div class='fields'>" +
+                        "<input inputmode='decimal' pattern='[0-9\\.]*' id='" + item.key + "' name='" + item.key + "' type='number' value='" + item.value + "' step='" + item.step + "'/>" +
+                        "&nbsp;±&nbsp;" +
+                        "<input inputmode='decimal' pattern='[0-9\\.]*' id='" + item.key + "_vary' class='vary-amount' min='0' name='" + item.key + "_vary' type='number' value='0' step='" + item.step + "'/>" +
+                        "</div>" +
+                        "</li>";
+                }).join("\n");
+                return sectionHtml + "</ul>";
+            }).join("\n");
+            el.innerHTML = html + "</div>";
+        }
+
+        function chartTooltipFormatter() {
+            const items = [];
+            const parseVal = (key, val) => {
+                if (!val) {
+                    return "";
+                }
+                if (configMap[key].parse === _int) {
+                    return val.toFixed(0);
+                } else if (configMap[key].parse === _perc) {
+                    return (val * 100.0).toFixed(1) + "%";
+                }
+                return val;
+            }
+            this.points.forEach(point => {
+                const [worst, best] = pairs[point.series.options.key];
+                const hasTwo = point.series.name !== "Selected";
+                items.push([
+                    point.series.name + (hasTwo ? " (worst)" : ""),
+                    parseVal(worst.varyKey, worst[worst.varyKey]),
+                    point.point.low,
+                ]);
+                if (hasTwo) {
+                    items.push([
+                        point.series.name + " (best)",
+                        parseVal(best.varyKey, best[best.varyKey]),
+                        point.point.high,
+                    ]);
+                }
+            });
+            items.sort((a, b) => b[2] - a[2]);
+            const year = Highcharts.dateFormat('%Y', new Date(this.x));
+            const yearOfBirth = pairs[this.points[0].series.options.key][0]['year_of_birth'];
+            const yearLabel = year + " (Age:" + (year - yearOfBirth) + ")";
+            let echo = "<div>" +
+                "<div class='point-label'>" + yearLabel + "</div>" +
+                "<div class='point-value'>Vary value</div>" +
+                "<div class='point-value'>Amount</div>" +
+                "</div>";
+            items.forEach((item) => {
+                echo += "<div>" +
+                    "<div class='point-label'>" + item[0] + "</div>" +
+                    "<div class='point-value'>" + item[1] + "</div>" +
+                    "<div class='point-value'>£" + Number(item[2].toFixed(0)).toLocaleString() + "</div>" +
+                    "</div>";
+            });
+            return echo;
+        }
+
+        function initProjectionChart(series) {
+            // Need separate check here because this happens before hash param parsing.
+            const hasShareData = new URLSearchParams(window.location.hash.substr(1)).get('share');
+            const chartOptions = {
+                title: {text: ''},
+                credits: {enabled: false},
+                chart: {backgroundColor: '#000000', type: 'arearange', zoomType: 'x'},
+                xAxis: {type: 'datetime', labels: {style: {color: '#ddd'}}},
+                yAxis: {title: '', min: 0, labels: {enabled: !hasShareData, style: {color: '#ddd'}}},
+                legend: {itemStyle: {color: "#ddd"}},
+                tooltip: {crosshairs: true, shared: true, useHTML: true, formatter: chartTooltipFormatter},
+            };
+            projectionChart = Highcharts.chart('section-projection-chart', chartOptions);
+        }
+
+        function initProjections() {
+            initConfig();
+            initProjectionChart([]);
+            loadUrlParams();
+            initListeners();
+            refreshProjectionChart();
+        }
+
+        function initListeners() {
+            const formFields = new FormData(document.getElementById("projection_form"));
+            const values = Object.fromEntries(formFields.entries());
+            Object.keys(values).forEach(key => {
+                const el = document.getElementById(key);
+                el.onchange = debounce(refreshProjectionChart, 500);
+            });
+            document.querySelectorAll("a.info_link").forEach(el => {
+                el.onclick = (event) => toggleInfo(event);
+            });
+        }
+
+        function toggleInfo(event) {
+            event.preventDefault();
+            const newInfoEl = event.target.closest("li");
+            if (infoEl && newInfoEl !== infoEl) {
+                infoEl.removeChild(infoEl.querySelector('.info_text'));
+                infoEl = null;
+            }
+            const el = event.target;
+            const par = el.closest("li");
+            const info = par.querySelector('.info_text');
+            if (info) {
+                par.removeChild(info);
+                infoEl = null;
+            } else {
+                const infoText = document.createElement("div");
+                infoText.classList.add('info_text');
+                infoText.innerHTML = document.getElementById(el.dataset.infoId).innerHTML;
+                const closeButton = document.createElement("button");
+                closeButton.innerText = 'Close';
+                closeButton.onclick = toggleInfo;
+                infoText.appendChild(closeButton);
+                par.appendChild(infoText);
+                infoEl = par;
+            }
+        }
+
+        function saveUrlParams(values) {
+            if (shareData) {
+                return; // Not updating hash when in share mode
+            }
+            const urlParams = new URLSearchParams();
+            Object.keys(values).forEach(key => urlParams.append(key, values[key]));
+            window.history.replaceState({}, "", '#' + urlParams.toString());
+        }
+
+        function loadUrlParams() {
+            const urlParams = new URLSearchParams(window.location.hash.substr(1));
+            if (urlParams.get('share')) {
+                shareData = (urlParams.get('share') || '').split(',').map(parseFloat);
+                sharePlotlines = (urlParams.get('lines') || '').split(',').map(v => parseInt(v, 10));
+                document.body.classList.add('share');
+            } else {
+                const formFields = new FormData(document.getElementById("projection_form"));
+                const values = Object.fromEntries(formFields.entries());
+                Object.keys(values).forEach(key => {
+                    const el = document.getElementById(key);
+                    if (urlParams.get(key)) {
+                        el.value = urlParams.get(key);
+                    }
+                });
+            }
+        }
+
+        function updateShareLink(data) {
+            // Not efficient, doesn't have to be. Max ~100 values if you run this as a baby and live very long.
+            const points = data.series.filter(s => s.name === 'Selected')[0].data.map(p => p[1]);
+            const maxValue = Math.max(...points);
+            const normalizedPoints = points.map(p => (p / maxValue).toFixed(3) * 1000).join(",");
+            const plotMap = {};
+            data.plotLines.forEach((pl) => plotMap[pl.id] = pl.year);
+            const plotLines = [
+                plotMap['Retire'],
+                plotMap['Personal Pension'],
+                plotMap['Mortgage'],
+                plotMap['State Pension'],
+            ];
+            const fullUrl = window.location.href.split("#")[0] + '#share=' + normalizedPoints + '&lines=' + plotLines;
+            document.getElementById("share_link").value = fullUrl;
+            document.getElementById("share_link_preview").href = fullUrl;
+        }
+
+        function refreshProjectionChart() {
+            const formData = new FormData(document.getElementById("projection_form"));
+            const formValues = Object.fromEntries(formData.entries());
+            saveUrlParams(formValues);
+            let data;
+            if (shareData) {
+                data = buildShareChartData();
+            } else {
+                data = buildProjectionChartData(formValues);
+                updateShareLink(data);
+            }
+
+            let seriesData = data.series;
+            let seenSeries = {};
+            for (let i = 0; i < seriesData.length; i++) {
+                let series = seriesData[i];
+                seenSeries[series.name] = true;
+                if (!projectionChartSeries[series.name]) {
+                    projectionChart.addSeries(series, false);
+                    projectionChartSeries[series.name] = projectionChart.series[projectionChart.series.length - 1];
+                } else {
+                    projectionChartSeries[series.name].setData(series.data, false);
+                }
+            }
+            for (var i = 0; i < projectionChart.series.length; i++) {
+                if (!seenSeries[projectionChart.series[i].name]) {
+                    delete projectionChartSeries[projectionChart.series[i].name];
+                    projectionChart.series[i].remove(false);
+                    i--;
+                }
+            }
+            projectionChartPlotLines.forEach(name => projectionChart.xAxis[0].removePlotLine(name));
+            data.plotLines.forEach(line => {
+                projectionChart.xAxis[0].addPlotLine(line);
+                projectionChartPlotLines.push(line.id);
+            });
+            projectionChart.redraw();
+        }
+
+        const makePlotline = ({year, name, color}, ix) => ({
+            'id': name,
+            'color': color,
+            'width': 2,
+            'value': new Date(year, 0, 1).getTime(),
+            'zIndex': 999,
+            'year': year,
+            'label': {
+                'text': name,
+                'useHTML': true,
+                'align': 'left',
+                'color': '#dddddd',
+                'rotation': 0,
+                'y': 15 + (ix * 25),
+            }
+        });
+
+        function buildShareChartData() {
+            const series = {
+                'name': 'Selected',
+                'key': 'selected',
+                'color': '#5599ff',
+                'opacity': 1.0,
+                'data': [],
+            }
+            for (let i = 0; i < shareData.length; i++) {
+                let ts = new Date(currentYear + i, 0, 1).getTime();
+                series.data.push([ts, shareData[i], shareData[i]]);
+            }
+            let plotLines = [];
+            if (sharePlotlines && sharePlotlines.length >= 4) {
+                plotLines = [
+                    {year: sharePlotlines[0], name: 'Retire', color: '#BB3333'},
+                    {year: sharePlotlines[1], name: 'Personal Pension', color: '#99DD33'},
+                    {year: sharePlotlines[2], name: 'Mortgage', color: '#9933CC'},
+                    {year: sharePlotlines[3], name: 'State Pension', color: '#FCCC33'},
+                ].sort((y1, y2) => y1.year - y2.year);
+            }
+
+            return {series: [series], plotLines: plotLines.map(makePlotline)};
+        }
+
+        function buildProjectionChartData(params) {
+            const yearData = {
+                'year': currentYear,
+            };
+            Object.keys(params).forEach(k => {
+                const parse = k.endsWith('_vary') ? configMap[k.substr(0, k.length - 5)].parse : configMap[k].parse;
+                yearData[k] = parse(params[k]);
+            });
+
+            const series = new Map();
+            // Exact set of user-specified params
+            series.set('selected', {
+                'name': 'Selected',
+                'key': 'selected',
+                'color': '#5599ff',
+                'opacity': 1.0,
+                'data': [],
+            });
+
+            pairs = {
+                'selected': [{...yearData}, {...yearData}]
+            };
+
+            // Check which params vary and add series for each
+            const varyKeys = Object.fromEntries(
+                Object.keys(configMap).map(key => [key, yearData[key + "_vary"]])
+                    .filter(([_, v]) => v > 0)
+            );
+            Object.keys(varyKeys).forEach(key => {
+                const best = {...yearData, varyKey: key};
+                const worst = {...yearData, varyKey: key};
+                // 'dir' specifies if a higher value is better or worse for total capital,
+                // e.g. a higher inflation is bad, but higher ROI on investments is good.
+                // This is needed to combine the best of all vary keys later.
+                best[key] += varyKeys[key] * configMap[key].dir;
+                worst[key] -= varyKeys[key] * configMap[key].dir;
+                series.set(key, {
+                    'name': configMap[key].label,
+                    'key': key,
+                    'opacity': 0.5,
+                    'data': [],
+                });
+                pairs[key] = [worst, best];
+            });
+
+            if (Object.keys(pairs).length > 2) {
+                const combined_best = {...yearData};
+                const combined_worst = {...yearData};
+                Object.keys(varyKeys).forEach(key => {
+                    combined_worst[key] = pairs[key][0][key];
+                    combined_best[key] = pairs[key][1][key];
+                });
+                pairs['combined'] = [combined_worst, combined_best];
+                series.set('combined', {
+                    'name': 'Combined',
+                    'key': 'combined',
+                    'color': '#666666',
+                    'opacity': 0.3,
+                    'data': [],
+                });
+            }
+
+            // Game loop
+            const endYear = yearData['year_of_birth'] + 90;
+            for (let y = currentYear; y <= endYear; y++) {
+                let ts = new Date(y, 0, 1).getTime();
+                Object.keys(pairs).forEach(key => {
+                    const [worst, best] = pairs[key];
+                    series.get(key).data.push(
+                        [ts, worst['capital'], best['capital']]
+                    );
+                    const new_worst = _calc_year(worst);
+                    const new_best = _calc_year(best);
+                    pairs[key] = [new_worst, new_best];
+                });
+            }
+
+            const statePensionYear = yearData['year_of_birth'] + yearData['state_pension_age'];
+            const pensionWithdrawalYear = yearData['year_of_birth'] + yearData['pensionWithdrawalAge'];
+            const plotLines = [
+                {year: yearData['retire_year'], name: 'Retire', color: '#BB3333'},
+                {year: pensionWithdrawalYear, name: 'Personal Pension', color: '#99DD33'},
+                {year: yearData['mortgage_year'], name: 'Mortgage', color: '#9933CC'},
+                {year: statePensionYear, name: 'State Pension', color: '#FCCC33'},
+            ].sort((y1, y2) => y1.year - y2.year);
+
+            return {
+                series: Array.from(series.keys()).reverse().map(key => series.get(key)),
+                plotLines: plotLines.map(makePlotline),
+            };
+        }
+
+        function _calc_year(params) {
+            const year = params['year'] + 1;
+            let capital = params['capital'];
+            const statePensionYear = params['year_of_birth'] + params['state_pension_age'];
+
+            // Adjust for inflation
+            let inflation = 1.0 + params['inflation']; // Base economic inflation
+            let capitalIncrease = 1.0;
+            if (year <= params['retire_year']) {
+                inflation += params["inflation_before"]; // Lifestyle inflation
+                capitalIncrease += params['roi_before'];
+            } else if (year <= statePensionYear) {
+                inflation += params["inflation_after"];
+                capitalIncrease += params['roi_after'];
+            } else {
+                inflation += params["inflation_pension"];
+                capitalIncrease += params['roi_pension'];
+            }
+
+            // Note that this calculation assumes that if your lifestyle inflation increases beyond
+            // the economy's inflation, you also increase your capital investment by the same amount.
+            // E.g. spend 2% more on holidays, also spend 2% more on putting money away
+            let new_capital_invest = params['capital_invest'] * inflation;
+            let new_cost_of_living = params['cost_of_living'] * inflation;
+            let taxable_capital = 0;
+
+            // Deduct costs
+            if (year <= params['retire_year']) {
+                capital += new_capital_invest;
+            } else {
+                capital -= new_cost_of_living;
+                taxable_capital += new_cost_of_living;
+            }
+
+            // Mortgage
+            if (year > params['retire_year'] && year <= params['mortgage_year']) {
+                capital -= params['mortgage_amount'];
+                taxable_capital += params['mortgage_amount'];
+            }
+
+            // ROI on remainder of capital
+            capital = capital * capitalIncrease;
+
+            // Personal Pension
+            const pensionWithdrawalYear = params['year_of_birth'] + params['pensionWithdrawalAge'];
+            let new_pension_amount = params['pension_amount'] * (1.0 + params['pension_increase']);
+            if (year <= params['retire_year']) {
+                new_pension_amount += params['pension_add'];
+            }
+            if (year == pensionWithdrawalYear) {
+                // Dump pension into capital at pension year
+                capital += new_pension_amount;
+                new_pension_amount = 0;
+            }
+
+            // State pension
+            if (year >= statePensionYear) {
+                const yearsWorked = params["state_pension_years_worked"] + (params["retire_year"] - currentYear)
+                let statePensionAmount = params.statePensionAmount;
+                statePensionAmount *= params["persons"];
+                statePensionAmount *= yearsWorked / 35.0;  //  Get full amount if worked 35 years
+                capital += statePensionAmount;
+                // Would use state pension first to not draw on capital gains allowance
+                taxable_capital -= statePensionAmount;
+            }
+
+            // Taxable capital
+            // Only calculate on capital gains that aren't tax free (not ISA, assuming 100% gain, not entirely accurate)
+            if (year > params['retire_year']) {
+                taxable_capital = taxable_capital * (1.0 - params['tax_free_percent']);
+                taxable_capital -= Math.max(0, params['capital_gains_allowance']) * params['persons'];  // Deduct capital gains allowance
+                const tax_on_gains = taxable_capital * 0.2;  // Assuming 20% flat tax rate on capital gains
+                if (tax_on_gains > 0) {
+                    capital -= tax_on_gains;
+                }
+            }
+
+            // Adjust capital gains allowance for the next year
+            const cgFactor = 1.0 + params['capital_gains_allowance_inflation'];
+            const new_capital_gains_allowance = params['capital_gains_allowance'] * cgFactor;
+
+            return {
+                ...params,
+                'year': year,
+                'capital': Math.max(capital, 0),
+                'cost_of_living': new_cost_of_living,
+                'capital_invest': new_capital_invest,
+                'pension_amount': new_pension_amount,
+                'state_pension_amount': params['state_pension_amount'] * params['inflation'],
+                'capital_gains_allowance': new_capital_gains_allowance,
+            };
+        }
+
+        window.onload = initProjections;
+    </script>
+</head>
+<body>
+<section class="info">
+    <h2>UK Retirement Calculator</h2>
+</section>
+<section class="projection config">
+    <p>
+        This chart shows you what your financial capital will be like around retirement, taking into
+        account a variety of things that apply to living in the UK, such as having a mortgage, a personal pension,
+        a state pension, ISAs etc. Please note that this calculation is an approximation and real life is a lot
+        more complicated than this projection. The information presented here is not financial advice and any
+        conclusions you draw from the information presented on this page are your own.
+    <p>
+    <p>
+        This page does not use cookies. All information that you enter here does not leave this page.
+        (Unless you deliberately share the link, which will contain the values you entered).
+    </p>
+    <form class="noshare" action="" method="POST" id="projection_form"></form>
+</section>
+
+<section id="section-projection" data-section="section-projection">
+    <div id="section-projection-chart" class="chart"/>
+</section>
+
+<section class="noshare">
+    <p>Link to share (<a href="#" id="share_link_preview" target="_blank">preview</a>): </p>
+    <input type="text" class="sharebox" id="share_link"/>
+    <p>
+        Values are normalized between 0 and 1 and only chart values are included, so none of the actual
+        values you put in are shared. Sharing this still reveals details about your financial situation,
+        so be mindful when sharing.
+    </p>
+</section>
+
+<section class="share">
+    <a href="#" onclick="window.location.hash = ''; window.location.reload();">Click here to make your own</a>
+</section>
+
+<div style="display:none">
+    <div id="cost_of_living_info">
+        <p>This is the amount your household (or your contribution to the household income) requires to live currently,
+            excluding mortgage and work-related expenses that will disappear after you retire.</p>
+        <p>This amount is adjusted for inflation each year when calculating your capital.</p>
+        <p>This should not include the money you put aside for investing or pension.</p>
+    </div>
+    <div id="inflation_info">
+        <p>This is the average estimated economic inflation.</p>
+        <p>The <a href="https://www.ons.gov.uk/economy/inflationandpriceindices" target="_blank"
+                  rel="noopener noreferrer">Office for National Statistics</a> has more info.</p>
+    </div>
+    <div id="inflation_before_info">
+        <div id="inflation_after_info">
+            <div id="inflation_pension_info">
+                <p>An estimate of how much your cost of living increases in addition to the economic inflation.</p>
+                <p>If you expect to be spending more money each year then this number should be higher than the
+                    expected economic inflation.</p>
+                <p>If you expect to be affected by economic inflation less then this number could be negative, e.g.
+                    when you are retired and are no longer spending a lot.</p>
+            </div>
+        </div>
+    </div>
+    <div id="persons_info">
+        <p>The number of persons in your household. The calculation here assumes that all persons are of the same
+            age and retire at the same time. If there's more than one person in your household, any income and capital
+            estimates should be for the combined household.</p>
+        <p>This number is used when calculating tax-free allowances and state pension amount.</p>
+    </div>
+    <div id="capital_info">
+        <p>Your savings as of today.</p>
+        <p>This is the main pool of money/stocks/funds/other assets that your yearly expenses will be paid out of
+            after retirement.</p>
+    </div>
+    <div id="capital_invest_info">
+        <div id="pension_add_info">
+            <p>The amount of money you add to your capital pool each year while you are still working.</p>
+        </div>
+    </div>
+    <div id="roi_before_info">
+        <div id="roi_after_info">
+            <div id="roi_pension_info">
+                <p>Your expected yearly profit percentage across all of your investments.</p>
+                <p>In a typical retirement strategy this number would go down over time as you reinvest into
+                    safer investments closer to retirement.</p>
+            </div>
+        </div>
+    </div>
+    <div id="capital_gains_allowance_info">
+        <p>Refer to the <a href="https://www.gov.uk/capital-gains-tax/allowances" target="_blank"
+                           rel="noopener noreferrer">HMRC Capital Gains Tax</a>
+            page for more information.</p>
+        <p>This number is multiplied by the number of persons when calculating the tax to pay each year.</p>
+    </div>
+    <div id="capital_gains_allowance_inflation_info">
+        <p>The percentage of increase in capital gains allowance each year.</p>
+        <p>While this might hold pace with economic inflation, it's not guaranteed.</p>
+    </div>
+    <div id="tax_free_percent_info">
+        <p>This is the percentage of your capital on which you don't have to pay taxes in investment gains.</p>
+        <p>See <a href="https://www.gov.uk/individual-savings-accounts/how-isas-work" target="_blank"
+                  rel="noopener noreferrer">HMRC Individual Savings Accounts (ISA)</a> for more information.</p>
+        <p>If all your investments are in an ISA you don't have to pay any tax on investment returns. However,
+            the calculation on this page assumes that you are taking your personal pension as a lump sum as soon
+            as you are allowed to. If that amount exceeds the yearly ISA allowance you will have to pay tax on that.</p>
+    </div>
+    <div id="pension_increase_info">
+        <p>Your expected yearly profit percentage across all of your personal pension investments until you
+            take the lump sum payment.</p>
+        <p>This will likely be a different number from the ROI on your other capital pools as most pension
+            pools will only allow you to invest in a subset of investment assets.</p>
+    </div>
+    <div id="pensionWithdrawalAge_info">
+        <p>The year in which you are allowed to withdraw your personal pension. Your pension provider typically
+            will not allow you to withdrawal the full amount of your pension until you reach a certain age.</p>
+        <p>See also the <a href="https://www.gov.uk/personal-pensions-your-rights/how-you-can-take-pension"
+                           target="_blank" rel="noopener noreferrer">HMRC Personal Pensions</a> page.</p>
+        <p>This calculation assumes that your personal pension flows into your main capital amount on the year
+            that you are allowed to withdraw the full amount, after which it will be zero.</p>
+    </div>
+    <div id="mortgage_amount_info">
+        <p>The total amount you pay for your mortgage each year. This amount is not adjusted for inflation since
+            the calculation assumes a fixed-rate mortgage.</p>
+        <p>This amount won't be deducted from your capital before your retirement year.</p>
+        <p>If you anticipate remortgaging, buying a new mortgage product, or a variable rate mortgage increasing in
+            cost, you should include those estimates in this number.</p>
+    </div>
+    <div id="state_pension_age_info">
+        <p>Check this on the <a href="https://www.gov.uk/state-pension-age" target="_blank" rel="noopener noreferrer">HMRC
+            State Pension Age</a> page.</p>
+    </div>
+    <div id="statePensionAmount_info">
+        <p>See <a href="https://www.gov.uk/new-state-pension" target="_blank" rel="noopener noreferrer">HMRC's
+            State
+            Pension</a> page for more information.</p>
+        <p>The calculation will use the number of years you worked as of your specified retirement year in order to
+            calculate
+            the amount of yearly state pension you are entitled to.</p>
+        <p>It also takes into account the number of persons in your household. For simplicity this calculation assumes
+            that all
+            (contributing) members to your household reach pension age at the same time.</p>
+        <p>The calculation used here adjusts this number in step with the specified inflation numbers.</p>
+    </div>
+    <div id="state_pension_years_worked_info">
+        <p>This is the number of years you have worked in the UK as of today.</p>
+        <p>This is used to calculate how much of the total amount of state pension you are eligible to receive
+            after retirement.</p>
+    </div>
+</div>
+</body>
+</html>
